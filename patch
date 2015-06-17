@@ -1,0 +1,48 @@
+--- C:/Users/xunxu/AppData/Local/Temp/svn-E9C0980	周三 六月 17 14:22:22 2015
++++ D:/back/codec_x265/ffmpeg-2.3.1/libavformat/udp.c	周三 六月 17 14:22:35 2015
+@@ -443,7 +443,7 @@ static int udp_get_file_handle(URLContext *h)
+     UDPContext *s = h->priv_data;
+     return s->udp_fd;
+ }
+-
++int overrun;
+ #if HAVE_PTHREAD_CANCEL
+ static void *circular_buffer_task( void *_URLContext)
+ {
+@@ -479,6 +479,7 @@ static void *circular_buffer_task( void *_URLConte
+         AV_WL32(s->tmp, len);
+ 
+         if(av_fifo_space(s->fifo) < len + 4) {
++        	overrun = 1;
+             /* No Space left */
+             if (s->overrun_nonfatal) {
+                 av_log(h, AV_LOG_WARNING, "Circular buffer overrun. "
+@@ -792,6 +793,28 @@ static int udp_read(URLContext *h, uint8_t *buf, i
+         do {
+             avail = av_fifo_size(s->fifo);
+             if (avail) { // >=size) {
++            	if(overrun) {
++					while(av_fifo_size(s->fifo)>188*100000) {//Almost 18M, clean when buffer overrun
++						int avail2 = av_fifo_size(s->fifo);
++						if (avail2) {
++							uint8_t tmp2[4];
++							av_fifo_generic_read(s->fifo, tmp2, 4, NULL);
++							avail2= AV_RL32(tmp2);
++							int avail_temp = avail2;
++							if(avail2 > size) {
++								av_log(h, AV_LOG_WARNING, "Part of datagram lost due to insufficient buffer size\n");
++								avail2= size;
++							}
++							do {
++								int len = FFMIN(s->fifo->end - s->fifo->rptr, avail2);
++								av_fifo_drain(s->fifo, len);
++								avail2 -= len;
++							} while (avail2 > 0);
++							av_fifo_drain(s->fifo, AV_RL32(tmp2) - avail_temp);
++						}
++					}
++					overrun = 0;
++				}
+                 uint8_t tmp[4];
+ 
+                 av_fifo_generic_read(s->fifo, tmp, 4, NULL);
